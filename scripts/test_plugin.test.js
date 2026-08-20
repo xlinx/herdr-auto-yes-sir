@@ -1,5 +1,4 @@
-const test = require('node:test'); const assert = require('node:assert/strict'); const { classifyPrompt, Limits, Herdr, main } = require('./auto_approve');
-const { monitorCommand } = require('./control');
+const test = require('node:test'); const assert = require('node:assert/strict'); const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { classifyPrompt, readTriggerStats, recordTrigger, Limits, Herdr, monitorMain, monitorCommand, triggerCount } = require('./plugin');
 test('classifies numbered menu', () => assert.equal(classifyPrompt('Choose an option:\n1. Continue\n2. Cancel'), '1'));
 test('classifies approval prompt', () => assert.equal(classifyPrompt('Allow this command? [y/N]'), 'y'));
 test('classifies Codex numbered approval prompt', () => assert.equal(classifyPrompt('Type 1 to approve this action'), '1'));
@@ -11,10 +10,13 @@ test('blocked subscription event triggers dry-run response', async () => {
   process.env.HERDR_ENV = '1';
   const fake = { agents: () => [{ agent: 'agent', pane_id: 'w1:p1' }], read: () => 'Allow? [y/N]', send: () => { throw new Error('sent'); } };
   const subscriber = { subscribe: async (_panes, onEvent) => onEvent({ event: 'pane.agent_status_changed', data: { pane_id: 'w1:p1', agent: 'agent', agent_status: 'blocked' } }), close() {} };
-  assert.equal(await main(['--count', '1', '--dry-run'], fake, () => subscriber), 0);
+  assert.equal(await monitorMain(['--count', '1', '--dry-run'], fake, () => subscriber), 0);
 });
 test('extracts agent panes for socket subscriptions', () => { const client = new Herdr(() => ({ status: 0, stdout: JSON.stringify({ result: { agents: [{ agent: 'agent-1', pane_id: 'w1:p1', agent_status: 'working' }] } }) })); assert.deepEqual(client.agents(), [{ agent: 'agent-1', pane_id: 'w1:p1', agent_status: 'working' }]); });
-test('forever monitor command has no duration value', () => assert.deepEqual(monitorCommand('/plugin', { forever: true, key: 'y' }), ['/plugin/scripts/auto_approve.js', '--forever', '--key', 'y']));
-test('timed monitor command includes duration', () => assert.deepEqual(monitorCommand('/plugin', { duration: 900 }), ['/plugin/scripts/auto_approve.js', '--duration', '900']));
+test('forever monitor command has no duration value', () => assert.deepEqual(monitorCommand('/plugin', { forever: true, key: 'y' }), ['/plugin/scripts/plugin.js', 'monitor', '--forever', '--key', 'y']));
+test('timed monitor command includes duration', () => assert.deepEqual(monitorCommand('/plugin', { duration: 900 }), ['/plugin/scripts/plugin.js', 'monitor', '--duration', '900']));
 test('agent read accepts plain output beginning with dash', () => { const client = new Herdr(() => ({ status: 0, stdout: '- Allow this command? [y/N]\n' })); assert.equal(client.read('w1:p1'), '- Allow this command? [y/N]\n'); });
 test('send keys accepts plain non-JSON output', () => { const client = new Herdr(() => ({ status: 0, stdout: '✗ You cancelled the prompt\n' })); assert.equal(client.send('w1:p1', 'y'), '✗ You cancelled the prompt\n'); });
+test('count lifetime command uses count instead of duration', () => assert.deepEqual(monitorCommand('/plugin', { count: 10 }), ['/plugin/scripts/plugin.js', 'monitor', '--count', '10']));
+test('picker count defaults to 10', () => { assert.equal(triggerCount(''), 10); assert.equal(triggerCount('7'), 7); });
+test('trigger statistics persist total and per-agent counts', () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-yes-sir-stats-')); try { recordTrigger('codex', dir); recordTrigger('codex', dir); recordTrigger('reviewer', dir); assert.deepEqual(readTriggerStats(dir), { total: 3, agents: { codex: 2, reviewer: 1 } }); } finally { fs.rmSync(dir, { recursive: true, force: true }); } });

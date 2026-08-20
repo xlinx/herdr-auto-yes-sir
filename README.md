@@ -49,10 +49,14 @@ The picker lets you:
 
 - monitor all live agents or one selected agent;
 - choose the one-character response key (`y` by default);
-- run forever, for one hour, or for a custom number of seconds;
+- run forever, for one hour, for a custom number of seconds, or for a response count;
 - pause with `p`, resume with `r`, or stop with `s`.
 
 When an agent becomes blocked, a split pane opens with a three-second countdown. Press `c` followed by Enter to cancel that response. If it is not cancelled, the configured key is sent to the blocked agent.
+
+`Forever` remains the default lifetime. The `By count` option defaults to 10 responses when its count prompt is left empty, logs the remaining count after each successful response, and stops at zero.
+
+The picker bottom shows persistent trigger statistics: the total across all agents and the successful-response count for each agent. Cancelled countdowns and failed sends are not counted.
 
 Stop the monitor:
 
@@ -90,9 +94,9 @@ description = "Stop Auto Yes Sir"
 The plugin actions are recommended. From a Herdr-managed pane, the monitor can also be run directly:
 
 ```bash
-HERDR_ENV=1 node scripts/auto_approve.js --forever
-HERDR_ENV=1 node scripts/auto_approve.js --duration 900 --agent AGENT_NAME --key y
-HERDR_ENV=1 node scripts/auto_approve.js --count 10 --dry-run
+HERDR_ENV=1 node scripts/plugin.js monitor --forever
+HERDR_ENV=1 node scripts/plugin.js monitor --duration 900 --agent AGENT_NAME --key y
+HERDR_ENV=1 node scripts/plugin.js monitor --count 10 --dry-run
 ```
 
 Available options:
@@ -108,7 +112,7 @@ Without a lifetime option, direct usage defaults to one hour.
 
 ## Logging and troubleshooting
 
-Runtime activity is appended to `monitor.log` in the plugin directory. The log includes lifecycle actions, Socket API subscriptions, blocked events, countdown results, responses, reconnects, and shutdown verification. The file is ignored by Git.
+Runtime activity is appended to `monitor.log` in the plugin directory. The log includes lifecycle actions, Socket API subscriptions, blocked events, countdown results, responses, reconnects, and shutdown verification. Persistent aggregate and per-agent counters are stored in the Herdr-managed plugin state directory. The runtime log is ignored by Git.
 
 Enable additional diagnostics before starting the monitor:
 
@@ -120,28 +124,72 @@ If behavior does not change after updating the source, stop and re-enable the mo
 
 ## How it works
 
-1. The picker starts a detached monitor through `scripts/control.js`.
+1. `scripts/plugin.js picker` starts a detached `monitor` subcommand through the `control` subcommand.
 2. The monitor subscribes to `pane.agent_status_changed` through `HERDR_SOCKET_PATH`.
 3. An `agent_status: "blocked"` event triggers a recent-output read.
 4. The prompt is fingerprinted to prevent duplicate responses.
 5. A cancellable countdown opens before the selected key is sent.
 6. New-agent events refresh all-agent subscriptions; socket failures reconnect after a short delay.
 
-See [function.md](function.md) for the detailed function manual.
+See [md/function.md](md/function.md) for the detailed function manual.
 
 ## Development
 
 Run syntax checks and tests:
 
 ```bash
-node --check scripts/auto_approve.js
-node --check scripts/control.js
-node --test scripts/test_auto_approve.test.js
+node --check scripts/plugin.js
+node --test scripts/test_plugin.test.js
 ```
+
+## for developer
+```text
+Use Herdr’s local link workflow—no GitHub push needed.
+
+  From the plugin directory:
+
+  cd yes_sir_herdr/plugins/herdr-auto-yes-sir
+
+  node --test scripts/test_plugin.test.js
+  herdr plugin link "$PWD"
+  herdr plugin action list --plugin xlinx.herdr-auto-yes-sir
+
+  Start the local code:
+
+  herdr plugin action invoke xlinx.herdr-auto-yes-sir.enable
+
+  To test the new count feature:
+
+  1. Select an agent or all agents.
+  2. Select 4) By count.
+  3. Press Enter to use the default count of 10.
+  4. Trigger a blocked agent prompt.
+  5. Check the remaining count:
+
+  tail -f monitor.log
+
+  Stop and reload after code changes:
+
+  herdr plugin action invoke xlinx.herdr-auto-yes-sir.disable
+  herdr plugin action invoke xlinx.herdr-auto-yes-sir.enable
+
+  If you changed herdr-plugin.toml, relink it:
+
+  herdr plugin unlink xlinx.herdr-auto-yes-sir
+  herdr plugin link "$PWD"
+
+  If the older development ID is still registered, remove it once:
+
+  herdr plugin unlink local.herdr-auto-yes-sir
+
+  Opening the picker again will show the persistent total and per-agent trigger counts at the bottom.
+```
+
 
 ## Marketplace
 
 This repository is published with the `herdr-plugin` GitHub topic. Herdr's community marketplace automatically indexes public repositories that contain a valid `herdr-plugin.toml` on the default branch.
+
 
 ## License
 
