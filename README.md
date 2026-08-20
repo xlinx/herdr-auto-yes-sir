@@ -1,19 +1,26 @@
-# DECADE.TW - herdr-Auto-Yes-Sir
+# herdr-Auto-Yes-Sir 
+
+##### as a developer, I know... sometimes, just yes sir.
 
 Automatically respond to blocked Herdr agent prompts after a three-second, cancellable countdown.
+
+## 💡Update Log
+* [add|0818] | 🟢 by count(default 10) 
+* [add|0819] | 🟢 by forever/time(1hr)/time(seconds)
 
 ![Herdr Auto Yes Sir picker](herdr_auto_yes_sir.png)
 
 The monitor uses Herdr's Socket API instead of polling. When an agent enters the `blocked` state—the red status shown in Herdr—it reads the prompt and sends the configured one-character response. Numbered menus can use `1`; approval and yes/no prompts commonly use `y`.
 
 > [!WARNING]
-> This plugin can approve commands and permissions on your behalf. Review the source, choose the narrowest useful agent scope and lifetime, and watch the countdown before enabling it.
+> This plugin can approve commands and permissions on your behalf. Review the source, choose the narrowest useful agent scope and lifetime, and keep running.
 
 ## Requirements
 
 - Herdr 0.8.2 or newer
 - Node.js 18 or newer
 - macOS or Linux
+- i dont have windows
 
 ## Install
 
@@ -143,6 +150,7 @@ node --test scripts/test_plugin.test.js
 ```
 
 ## for developer
+### link local source
 ```text
 Use Herdr’s local link workflow—no GitHub push needed.
 
@@ -184,7 +192,28 @@ Use Herdr’s local link workflow—no GitHub push needed.
 
   Opening the picker again will show the persistent total and per-agent trigger counts at the bottom.
 ```
+### link back to github
+```text
+To switch from a locally linked plugin to the GitHub-managed version:
 
+  herdr plugin action invoke xlinx.herdr-auto-yes-sir.disable
+  herdr plugin unlink xlinx.herdr-auto-yes-sir
+  
+  herdr plugin install xlinx/herdr-auto-yes-sir
+
+  #Verify it:
+
+  herdr plugin list
+  herdr plugin action list --plugin xlinx.herdr-auto-yes-sir
+  herdr plugin action invoke xlinx.herdr-auto-yes-sir.enable
+
+  To update after pushing newer code, reinstall:
+
+  herdr plugin uninstall xlinx.herdr-auto-yes-sir
+  herdr plugin install xlinx/herdr-auto-yes-sir
+
+  Herdr preserves the plugin config/state directory across reinstallations, so saved settings and trigger statistics should remain.
+```
 
 ## Marketplace
 
@@ -194,3 +223,21 @@ This repository is published with the `herdr-plugin` GitHub topic. Herdr's commu
 ## License
 
 No license has been selected yet. All rights are reserved by the repository owner.
+
+<hr/>
+
+## Quick Link other ai tools
+
+* Auto prompt by LLM and LLM-Vision (Trigger more details out inside model)
+    * SD-WEB-UI: https://github.com/xlinx/sd-webui-decadetw-auto-prompt-llm
+    * ComfyUI:   https://github.com/xlinx/ComfyUI-decadetw-auto-prompt-llm
+* Auto msg to ur mobile  (LINE | Telegram | Discord)
+    * SD-WEB-UI :https://github.com/xlinx/sd-webui-decadetw-auto-messaging-realtime
+    * ComfyUI:  https://github.com/xlinx/ComfyUI-decadetw-auto-messaging-realtime
+* I'm SD-VJ. (share SD-generating-process in realtime by gpu)
+    * SD-WEB-UI: https://github.com/xlinx/sd-webui-decadetw-spout-syphon-im-vj
+    * ComfyUI:   https://github.com/xlinx/ComfyUI-decadetw-spout-syphon-im-vj
+* CivitAI Info|discuss:
+    * https://civitai.com/articles/6988/extornode-using-llm-trigger-more-detail-that-u-never-thought
+    * https://civitai.com/articles/6989/extornode-sd-image-auto-msg-to-u-mobile-realtime
+    * https://civitai.com/articles/7090/share-sd-img-to-3rd-software-gpu-share-memory-realtime-spout-or-syphon

@@ -498,7 +498,7 @@ async function pickerMain() {
     names.forEach((name, i) => console.log(`${i + 2}) ${name}`));
     console.log('p) Pause monitor    r) Resume monitor    s) Stop monitor');
     const stats = readTriggerStats();
-    console.log(`\nTrigger statistics\nAll agents: ${stats.total}`);
+    console.log(`\n============Trigger statistics\nAll agents: ${stats.total}`);
     Object.entries(stats.agents).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([name, count]) => console.log(`${name}: ${count}`));
     const choice = (await ask(rl, '\nEnter a choice (q to cancel): ')).trim().toLowerCase();
     if (!choice || ['q', 'quit'].includes(choice)) {
@@ -517,7 +517,7 @@ async function pickerMain() {
         return 2;
     }
     const target = selected === 1 ? null : names[selected - 2];
-    const key = (await ask(rl, 'Key to send for every prompt [y]: ')).trim() || 'y';
+    const key = (await ask(rl, 'When status become blocked(red), which Key to send [y|1|2|3|...any char key]: ')).trim() || '1';
     if ([...key].length !== 1) {
         console.log('The response key must be exactly one character');
         rl.close();
