@@ -1,0 +1,20 @@
+const test = require('node:test'); const assert = require('node:assert/strict'); const { classifyPrompt, Limits, Herdr, main } = require('./auto_approve');
+const { monitorCommand } = require('./control');
+test('classifies numbered menu', () => assert.equal(classifyPrompt('Choose an option:\n1. Continue\n2. Cancel'), '1'));
+test('classifies approval prompt', () => assert.equal(classifyPrompt('Allow this command? [y/N]'), 'y'));
+test('classifies Codex numbered approval prompt', () => assert.equal(classifyPrompt('Type 1 to approve this action'), '1'));
+test('classifies Codex yes prompt', () => assert.equal(classifyPrompt('Press y to continue'), 'y'));
+test('ignores empty prompt', () => assert.equal(classifyPrompt('  '), null));
+test('enforces count limit', () => { assert.equal(new Limits(2).reached(2), true); assert.equal(new Limits(2).reached(1), false); });
+test('enforces deadline limit', () => assert.equal(new Limits(null, 10).reached(0, 10), true));
+test('blocked subscription event triggers dry-run response', async () => {
+  process.env.HERDR_ENV = '1';
+  const fake = { agents: () => [{ agent: 'agent', pane_id: 'w1:p1' }], read: () => 'Allow? [y/N]', send: () => { throw new Error('sent'); } };
+  const subscriber = { subscribe: async (_panes, onEvent) => onEvent({ event: 'pane.agent_status_changed', data: { pane_id: 'w1:p1', agent: 'agent', agent_status: 'blocked' } }), close() {} };
+  assert.equal(await main(['--count', '1', '--dry-run'], fake, () => subscriber), 0);
+});
+test('extracts agent panes for socket subscriptions', () => { const client = new Herdr(() => ({ status: 0, stdout: JSON.stringify({ result: { agents: [{ agent: 'agent-1', pane_id: 'w1:p1', agent_status: 'working' }] } }) })); assert.deepEqual(client.agents(), [{ agent: 'agent-1', pane_id: 'w1:p1', agent_status: 'working' }]); });
+test('forever monitor command has no duration value', () => assert.deepEqual(monitorCommand('/plugin', { forever: true, key: 'y' }), ['/plugin/scripts/auto_approve.js', '--forever', '--key', 'y']));
+test('timed monitor command includes duration', () => assert.deepEqual(monitorCommand('/plugin', { duration: 900 }), ['/plugin/scripts/auto_approve.js', '--duration', '900']));
+test('agent read accepts plain output beginning with dash', () => { const client = new Herdr(() => ({ status: 0, stdout: '- Allow this command? [y/N]\n' })); assert.equal(client.read('w1:p1'), '- Allow this command? [y/N]\n'); });
+test('send keys accepts plain non-JSON output', () => { const client = new Herdr(() => ({ status: 0, stdout: '✗ You cancelled the prompt\n' })); assert.equal(client.send('w1:p1', 'y'), '✗ You cancelled the prompt\n'); });

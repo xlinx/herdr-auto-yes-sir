@@ -1,0 +1,42 @@
+id = "xlinx.herdr-auto-yes-sir"
+name = "Herdr Auto Yes Sir"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Automatically answer blocked Herdr agent prompts after a cancellable countdown."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "enable"
+title = "Choose agents and start auto-yes-sir"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "xlinx.herdr-auto-yes-sir", "--entrypoint", "monitor-picker"]
+
+[[actions]]
+id = "disable"
+title = "Disable auto-yes-sir"
+contexts = ["workspace"]
+command = ["node", "scripts/control.js", "disable"]
+
+[[panes]]
+id = "monitor-picker"
+title = "Auto Yes Sir — choose agents"
+placement = "overlay"
+command = ["node", "scripts/picker.js"]
+
+[[panes]]
+id = "countdown"
+title = "Auto Yes Sir — confirm input"
+placement = "split"
+command = ["node", "scripts/countdown.js"]
+
+[[keys.command]]
+key = "prefix+y"
+type = "plugin_action"
+command = "xlinx.herdr-auto-yes-sir.enable"
+description = "Enable auto-yes-sir"
+
+[[keys.command]]
+key = "prefix+shift+y"
+type = "plugin_action"
+command = "xlinx.herdr-auto-yes-sir.disable"
+description = "Disable auto-yes-sir"
