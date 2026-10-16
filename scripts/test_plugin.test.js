@@ -1,4 +1,4 @@
-const test = require('node:test'); const assert = require('node:assert/strict'); const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { classifyPrompt, readTriggerStats, recordTrigger, Limits, Herdr, monitorMain, monitorCommand, triggerCount } = require('./plugin');
+const test = require('node:test'); const assert = require('node:assert/strict'); const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { classifyPrompt, responseKeys, countdownConfirm, parseControlArgs, readTriggerStats, recordTrigger, Limits, Herdr, monitorMain, monitorCommand, triggerCount } = require('./plugin');
 test('classifies numbered menu', () => assert.equal(classifyPrompt('Choose an option:\n1. Continue\n2. Cancel'), '1'));
 test('classifies approval prompt', () => assert.equal(classifyPrompt('Allow this command? [y/N]'), 'y'));
 test('classifies Codex numbered approval prompt', () => assert.equal(classifyPrompt('Type 1 to approve this action'), '1'));
@@ -20,3 +20,21 @@ test('send keys accepts plain non-JSON output', () => { const client = new Herdr
 test('count lifetime command uses count instead of duration', () => assert.deepEqual(monitorCommand('/plugin', { count: 10 }), ['/plugin/scripts/plugin.js', 'monitor', '--count', '10']));
 test('picker count defaults to 10', () => { assert.equal(triggerCount(''), 10); assert.equal(triggerCount('7'), 7); });
 test('trigger statistics persist total and per-agent counts', () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-yes-sir-stats-')); try { recordTrigger('codex', dir); recordTrigger('codex', dir); recordTrigger('reviewer', dir); assert.deepEqual(readTriggerStats(dir), { total: 3, agents: { codex: 2, reviewer: 1 } }); } finally { fs.rmSync(dir, { recursive: true, force: true }); } });
+test('response keys accept one character, key names, and sequences', () => { assert.deepEqual(responseKeys('y'), ['y']); assert.deepEqual(responseKeys('enter'), ['enter']); assert.deepEqual(responseKeys('ctrl+c'), ['ctrl+c']); assert.deepEqual(responseKeys('y enter'), ['y', 'enter']); assert.equal(responseKeys('yes'), null); assert.equal(responseKeys(''), null); });
+test('send keys passes key sequences as separate arguments', () => { const calls = []; const client = new Herdr(args => { calls.push(args.slice(1)); return { status: 0, stdout: '' }; }); client.send('w1:p1', 'y enter'); assert.deepEqual(calls, [['agent', 'send-keys', 'w1:p1', 'y', 'enter']]); });
+test('unnamed agents resolve by pane id', () => { const client = new Herdr(() => ({ status: 0, stdout: JSON.stringify({ result: { agent: { agent: 'agy', pane_id: 'w9:p1' }, type: 'agent_info' } }) })); assert.deepEqual(client.agents('w9:p1'), [{ agent: 'agy', pane_id: 'w9:p1' }]); });
+test('agent type matches every agent of that type', () => { const client = new Herdr(() => ({ status: 0, stdout: JSON.stringify({ result: { agents: [{ agent: 'claude', name: 'claude', pane_id: 'w1:p1' }, { agent: 'claude', name: 'claude-2', pane_id: 'w2:p1' }, { agent: 'agy', pane_id: 'w3:p1' }] } }) })); assert.deepEqual(client.agents(null, 'claude').map(a => a.pane_id), ['w1:p1', 'w2:p1']); assert.deepEqual(client.agents(null, 'codex'), []); });
+test('agent type flows through control and monitor commands', () => { assert.deepEqual(parseControlArgs(['enable', '--agent-type', 'agy']).args, { agentType: 'agy' }); assert.deepEqual(monitorCommand('/plugin', { forever: true, agentType: 'agy', key: 'enter' }), ['/plugin/scripts/plugin.js', 'monitor', '--forever', '--agent-type', 'agy', '--key', 'enter']); });
+test('countdown targets the blocked pane and fails closed', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-yes-sir-countdown-'));
+  const argsFile = path.join(dir, 'args'); const bin = path.join(dir, 'herdr');
+  fs.writeFileSync(bin, `#!/bin/sh\necho "$@" > '${argsFile}'\nexit 1\n`, { mode: 0o755 });
+  const saved = { ...process.env };
+  Object.assign(process.env, { HERDR_BIN_PATH: bin, HERDR_PLUGIN_STATE_DIR: dir, HERDR_PLUGIN_ROOT: dir, HERDR_AUTO_YES_SIR_FILE_ONLY: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p9' });
+  try {
+    assert.equal(countdownConfirm('w3:p1', 'enter'), false);
+    const args = fs.readFileSync(argsFile, 'utf8').trim().split(' ');
+    assert.equal(args[args.indexOf('--target-pane') + 1], 'w3:p1');
+    assert.equal(args.includes('--workspace'), false);
+  } finally { process.env = saved; fs.rmSync(dir, { recursive: true, force: true }); }
+});

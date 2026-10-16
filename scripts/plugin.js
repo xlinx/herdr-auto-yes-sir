@@ -20,6 +20,17 @@ function classifyPrompt(text) {
     return null;
 }
 
+const NAMED_KEY = /^(?:(?:ctrl|alt|shift)\+)*(?:enter|esc|escape|tab|space|backspace|up|down|left|right|[a-z0-9])$/i;
+
+// A response is one character, or a space-separated sequence of characters and
+// Herdr key names, e.g. "enter" or "y enter".
+function responseKeys(key) {
+    const value = String(key ?? '');
+    if ([...value].length === 1) return [value];
+    const parts = value.trim().split(/\s+/).filter(Boolean);
+    return parts.length && parts.every(part => [...part].length === 1 || NAMED_KEY.test(part)) ? parts : null;
+}
+
 function promptFingerprint(agent, text) {
     return crypto.createHash('sha256').update(`${agent}\0${String(text).trim()}`).digest('hex');
 }
@@ -100,7 +111,9 @@ class Herdr {
         return parseJson(this.run(...args));
     }
 
-    agents(target) {
+    agents(target, type = null) {
+        // A type matches every live agent of that kind (e.g. all "agy" panes), re-resolved on each subscription cycle.
+        if (type) return [...items(this.call('agent', 'list'))].filter(item => item.pane_id && item.agent === type);
         const data = target ? this.call('agent', 'get', target) : this.call('agent', 'list');
         const list = [...items(data)];
         if (target && !list.length && data && typeof data === 'object') list.push(data);
@@ -112,7 +125,7 @@ class Herdr {
     }
 
     send(name, key) {
-        return this.run('agent', 'send-keys', name, key);
+        return this.run('agent', 'send-keys', name, ...(responseKeys(key) || [key]));
     }
 }
 
@@ -201,9 +214,11 @@ function sleep(seconds) {
 }
 
 function logConfig(args) {
-    log(`monitor configuration: mode=socket-subscription scope=${args.agent || 'all-agents'} key=${args.key || 'auto-classify'} lifetime=${args.forever ? 'forever' : args.count != null ? `count:${args.count}` : `duration:${args.duration}s`} dry_run=${args.dryRun}`);
+    log(`monitor configuration: mode=socket-subscription scope=${args.agentType ? `type:${args.agentType}` : args.agent || 'all-agents'} key=${args.key || 'auto-classify'} lifetime=${args.forever ? 'forever' : args.count != null ? `count:${args.count}` : `duration:${args.duration}s`} dry_run=${args.dryRun}`);
 }
 
+// Returns true only when the countdown pane ran to completion without being cancelled.
+// If the pane cannot be opened or never reports back, nothing is sent (fail closed).
 function countdownConfirm(agent, key) {
     const dir = process.env.HERDR_PLUGIN_STATE_DIR;
     if (!dir) {
@@ -220,11 +235,16 @@ function countdownConfirm(agent, key) {
     }
     fs.writeFileSync(request, JSON.stringify({token, agent, key, seconds: 3}));
     const command = [process.env.HERDR_BIN_PATH || 'herdr', 'plugin', 'pane', 'open', '--plugin', 'xlinx.herdr-auto-yes-sir', '--entrypoint', 'countdown', '--placement', 'split', '--direction', 'down', '--focus'];
-    if (process.env.HERDR_WORKSPACE_ID) command.push('--workspace', process.env.HERDR_WORKSPACE_ID);
-    if (process.env.HERDR_PANE_ID) command.push('--target-pane', process.env.HERDR_PANE_ID);
+    // Split next to the blocked agent's own pane: the monitor runs detached, so the pane that started it may be gone.
+    // No --workspace: herdr 0.9.3 rejects --target-pane when --workspace is also given.
+    command.push('--target-pane', agent);
     const launch = spawnSync(command[0], command.slice(1), {encoding: 'utf8'});
-    if (launch.status !== 0) log(`${agent}: countdown window failed to open: ${(launch.stderr || launch.stdout || '').trim()}`); else log(`${agent}: countdown window opened`);
-    const deadline = Date.now() + 4500;
+    if (launch.status !== 0) {
+        log(`${agent}: countdown window failed to open; not sending ${key}: ${(launch.stderr || launch.stdout || '').trim()}`);
+        return false;
+    }
+    log(`${agent}: countdown window opened`);
+    const deadline = Date.now() + 6000;
     while (Date.now() < deadline) {
         try {
             const data = JSON.parse(fs.readFileSync(result, 'utf8'));
@@ -233,15 +253,15 @@ function countdownConfirm(agent, key) {
         }
         sleep(0.1);
     }
-    log(`${agent}: countdown completed without popup response; sending ${key}`);
-    return true;
+    log(`${agent}: countdown window did not report back; not sending ${key}`);
+    return false;
 }
 
 function parseMonitorArgs(argv) {
     const a = {dryRun: false, forever: false};
     for (let i = 0; i < argv.length; i++) {
         const x = argv[i];
-        if (x === '--count') a.count = Number(argv[++i]); else if (x === '--duration') a.duration = Number(argv[++i]); else if (x === '--forever') a.forever = true; else if (x === '--agent') a.agent = argv[++i]; else if (x === '--key') a.key = argv[++i]; else if (x === '--dry-run') a.dryRun = true; else throw new Error(`unknown option ${x}`);
+        if (x === '--count') a.count = Number(argv[++i]); else if (x === '--duration') a.duration = Number(argv[++i]); else if (x === '--forever') a.forever = true; else if (x === '--agent') a.agent = argv[++i]; else if (x === '--agent-type') a.agentType = argv[++i]; else if (x === '--key') a.key = argv[++i]; else if (x === '--dry-run') a.dryRun = true; else throw new Error(`unknown option ${x}`);
     }
     return a;
 }
@@ -258,8 +278,8 @@ async function monitorMain(argv = [], client = null, subscriberFactory = null) {
         log('HERDR_ENV=1 is required; refusing to run outside Herdr');
         return 2;
     }
-    if ((args.count != null && args.count <= 0) || (args.duration != null && args.duration <= 0) || (args.key != null && [...args.key].length !== 1)) {
-        log(args.key != null ? '--key must be exactly one character' : 'count and duration must be positive');
+    if ((args.count != null && args.count <= 0) || (args.duration != null && args.duration <= 0) || (args.key != null && !responseKeys(args.key))) {
+        log(args.key != null && !responseKeys(args.key) ? '--key must be one character or key names such as "enter"' : 'count and duration must be positive');
         return 2;
     }
     if (args.count == null && args.duration == null && !args.forever) {
@@ -290,7 +310,7 @@ async function monitorMain(argv = [], client = null, subscriberFactory = null) {
     let reconnects = 0;
     while (!stopped && !limits.reached(sent)) {
         try {
-            const agents = herdr.agents(args.agent);
+            const agents = herdr.agents(args.agent, args.agentType);
             const paneIds = [...new Set(agents.map(item => item.pane_id))];
             const subscriber = subscriberFactory ? subscriberFactory() : new HerdrSubscription();
             activeSubscription = subscriber;
@@ -325,7 +345,7 @@ async function monitorMain(argv = [], client = null, subscriberFactory = null) {
                             return;
                         }
                         if (!args.dryRun && !countdownConfirm(target, key)) {
-                            log(`${name}: cancelled by user`);
+                            log(`${name}: not sent (cancelled or countdown unavailable)`);
                             return;
                         }
                         if (args.dryRun) log(`${name}: would send ${key}`); else {
@@ -365,6 +385,7 @@ function parseControlArgs(argv) {
     const args = {};
     for (let i = 1; i < argv.length; i++) {
         if (argv[i] === '--agent') args.agent = argv[++i];
+        else if (argv[i] === '--agent-type') args.agentType = argv[++i];
         else if (argv[i] === '--key') args.key = argv[++i];
         else if (argv[i] === '--duration') args.duration = Number(argv[++i]);
         else if (argv[i] === '--count') args.count = Number(argv[++i]);
@@ -380,6 +401,7 @@ function monitorCommand(root, config) {
     else if (config.forever) command.push('--forever');
     else command.push('--duration', String(config.duration || 3600));
     if (config.agent) command.push('--agent', config.agent);
+    if (config.agentType) command.push('--agent-type', config.agentType);
     if (config.key) command.push('--key', config.key);
     return command;
 }
@@ -462,7 +484,7 @@ function controlMain(argv = []) {
         console.log(`auto-yes-sir monitor restarted (pid ${pid})`);
         return 0;
     }
-    if (args.key && [...args.key].length !== 1) { console.error('--key must be exactly one character'); return 2; }
+    if (args.key && !responseKeys(args.key)) { console.error('--key must be one character or key names such as "enter"'); return 2; }
     if ((args.count != null && (!Number.isInteger(args.count) || args.count <= 0)) || (args.duration != null && !(args.duration > 0))) { console.error('count and duration must be positive'); return 2; }
     const pid = currentPid();
     if (pid) { console.log(`auto-yes-sir monitor already running (pid ${pid})`); return 0; }
@@ -488,14 +510,20 @@ async function pickerMain() {
         console.error(`Unable to list Herdr agents: ${(result.stderr || '').trim()}`);
         return 1;
     }
-    const names = [];
+    // Agents without a herdr name can only be resolved by pane id, so target those by pane.
+    const choices = [];
+    const types = new Map();
     for (const item of items(JSON.parse(result.stdout))) {
-        const name = agentName(item);
-        if (name && !names.includes(name)) names.push(name);
+        if (item.pane_id && item.agent) types.set(item.agent, (types.get(item.agent) || 0) + 1);
+        const target = item.name || item.pane_id;
+        if (!target || choices.some(c => c.flag === '--agent' && c.target === target)) continue;
+        choices.push({flag: '--agent', target, label: item.name ? item.name : `${agentName(item) || 'agent'} (pane ${item.pane_id})`});
     }
+    // Type entries cover every current and future agent of that kind, so the label shows how many match now.
+    for (const [type, count] of types) choices.push({flag: '--agent-type', target: type, label: `All ${type} agents (${count} now, plus any started later)`});
     const rl = readline.createInterface({input: process.stdin, output: process.stdout});
     console.log('Auto Yes Sir monitor — choose scope\n\n1) All agents');
-    names.forEach((name, i) => console.log(`${i + 2}) ${name}`));
+    choices.forEach((c, i) => console.log(`${i + 2}) ${c.label}`));
     console.log('p) Pause monitor    r) Resume monitor    s) Stop monitor');
     const stats = readTriggerStats();
     console.log(`\n============Trigger statistics\nAll agents: ${stats.total}`);
@@ -511,15 +539,15 @@ async function pickerMain() {
         return spawnSync(process.execPath, [__filename, 'control', {p: 'pause', r: 'resume', s: 'disable'}[choice]], {stdio: 'inherit'}).status;
     }
     const selected = Number(choice);
-    if (!Number.isInteger(selected) || selected < 1 || selected > names.length + 1) {
+    if (!Number.isInteger(selected) || selected < 1 || selected > choices.length + 1) {
         console.log('Invalid choice');
         rl.close();
         return 2;
     }
-    const target = selected === 1 ? null : names[selected - 2];
-    const key = (await ask(rl, 'When status become blocked(red), which Key to send [y|1|2|3|...any char key]: ')).trim() || '1';
-    if ([...key].length !== 1) {
-        console.log('The response key must be exactly one character');
+    const target = selected === 1 ? null : choices[selected - 2];
+    const key = (await ask(rl, 'When status become blocked(red), which Key to send [y|1|enter|"y enter"|...any char key]: ')).trim().replace(/\s+/g, ' ') || '1';
+    if (!responseKeys(key)) {
+        console.log('The response key must be one character or key names such as "enter" or "y enter"');
         rl.close();
         return 2;
     }
@@ -547,7 +575,7 @@ async function pickerMain() {
         rl.close();
         return 2;
     }
-    if (target) command.push('--agent', target);
+    if (target) command.push(target.flag, target.target);
     rl.close();
     return spawnSync(process.execPath, command, {stdio: 'inherit'}).status;
 }
@@ -591,5 +619,5 @@ async function dispatch(argv = process.argv.slice(2)) {
     return 2;
 }
 
-module.exports = {classifyPrompt, promptFingerprint, readTriggerStats, recordTrigger, Limits, Herdr, HerdrSubscription, monitorMain, parseControlArgs, monitorCommand, controlMain, triggerCount, pickerMain, countdownMain, dispatch, items, agentName};
+module.exports = {classifyPrompt, responseKeys, countdownConfirm, promptFingerprint, readTriggerStats, recordTrigger, Limits, Herdr, HerdrSubscription, monitorMain, parseControlArgs, monitorCommand, controlMain, triggerCount, pickerMain, countdownMain, dispatch, items, agentName};
 if (require.main === module) dispatch().then(code => { process.exitCode = code; }).catch(error => { log(`plugin fatal error: ${error.message}`); process.exitCode = 1; });

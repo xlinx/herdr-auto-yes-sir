@@ -54,12 +54,14 @@ herdr plugin action invoke xlinx.herdr-auto-yes-sir.enable
 
 The picker lets you:
 
-- monitor all live agents or one selected agent;
-- choose the one-character response key (`y` by default);
+- monitor all live agents, one selected agent, or every agent of one type (for example all `agy` agents, including ones started later);
+- choose the response: one character such as `y` or `1`, a key name such as `enter` or `esc`, or a space-separated sequence such as `y enter` (`1` if left empty);
 - run forever, for one hour, for a custom number of seconds, or for a response count;
 - pause with `p`, resume with `r`, or stop with `s`.
 
-When an agent becomes blocked, a split pane opens with a three-second countdown. Press `c` followed by Enter to cancel that response. If it is not cancelled, the configured key is sent to the blocked agent.
+When an agent becomes blocked, a split pane opens below that agent with a three-second countdown. Press `c` followed by Enter to cancel that response. If it is not cancelled, the configured key is sent to the blocked agent. If the countdown pane cannot be opened or does not report back, nothing is sent.
+
+Agents without a Herdr name (for example `agy` or `codex`) are listed and targeted by pane id, such as `agy (pane w9:p1)`. Pane ids can change when Herdr restarts; use the agent-type option or `herdr agent rename` for a stable target.
 
 `Forever` remains the default lifetime. The `By count` option defaults to 10 responses when its count prompt is left empty, logs the remaining count after each successful response, and stops at zero.
 
@@ -104,6 +106,7 @@ The plugin actions are recommended. From a Herdr-managed pane, the monitor can a
 HERDR_ENV=1 node scripts/plugin.js monitor --forever
 HERDR_ENV=1 node scripts/plugin.js monitor --duration 900 --agent AGENT_NAME --key y
 HERDR_ENV=1 node scripts/plugin.js monitor --count 10 --dry-run
+HERDR_ENV=1 node scripts/plugin.js monitor --forever --agent-type agy --key enter
 ```
 
 Available options:
@@ -111,8 +114,9 @@ Available options:
 - `--forever`
 - `--duration SECONDS`
 - `--count N`
-- `--agent NAME`
-- `--key CHARACTER`
+- `--agent NAME_OR_PANE_ID`
+- `--agent-type TYPE`
+- `--key KEY` (one character, a key name such as `enter`, or a sequence such as `"y enter"`)
 - `--dry-run`
 
 Without a lifetime option, direct usage defaults to one hour.
